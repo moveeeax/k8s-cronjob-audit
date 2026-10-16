@@ -1,0 +1,57 @@
+---
+# Source: billing/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: billing-config
+data:
+  TZ: Europe/Moscow
+---
+# Source: billing/templates/cronjob-invoice.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: invoice-sweep
+  namespace: billing
+spec:
+  schedule: "*/2 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: sweep
+              image: ghcr.io/example/invoice-sweep:3.1.0
+---
+# Source: billing/templates/cronjob-reconcile.yaml
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: ledger-reconcile
+  namespace: billing
+spec:
+  schedule: "@daily"
+  concurrencyPolicy: Replace
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 500
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 3600
+      backoffLimit: 4
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: reconcile
+              image: ghcr.io/example/ledger:1.0.0
+---
+# Source: billing/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: billing
+spec:
+  ports:
+    - port: 8080

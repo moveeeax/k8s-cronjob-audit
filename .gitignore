@@ -1,0 +1,10 @@
+# Built binary, anchored to the repo root so it never matches cmd/k8s-cronjob-audit/
+/k8s-cronjob-audit
+/dist/
+/*.exe
+/*.out
+/coverage.out
+
+# Fixtures are part of the test suite and must always be tracked.
+!testdata/**
+!examples/**

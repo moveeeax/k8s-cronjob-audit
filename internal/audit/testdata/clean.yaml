@@ -1,0 +1,24 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-backup
+  namespace: prod
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  suspend: false
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 3600
+      ttlSecondsAfterFinished: 86400
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: backup
+              image: ghcr.io/example/pg-backup:1.4.2
+              args: ["--to", "s3://example-backups/pg"]

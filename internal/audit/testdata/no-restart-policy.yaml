@@ -1,0 +1,21 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: log-rotate
+  namespace: ops
+spec:
+  schedule: "30 1 * * 0"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 200
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 1200
+      backoffLimit: 1
+      template:
+        spec:
+          containers:
+            - name: rotate
+              image: busybox:1.37
+              command: ["sh", "-c", "logrotate -f /etc/logrotate.conf"]
