@@ -1,7 +1,7 @@
 # k8s-cronjob-audit
 
 [![ci](https://github.com/moveeeax/k8s-cronjob-audit/actions/workflows/ci.yml/badge.svg)](https://github.com/moveeeax/k8s-cronjob-audit/actions/workflows/ci.yml)
-[![go](https://img.shields.io/badge/go-1.22%2B-00ADD8)](https://go.dev/dl/)
+[![go](https://img.shields.io/badge/go-1.26%2B-00ADD8)](https://go.dev/dl/)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 Audit Kubernetes CronJob manifests for the settings that turn a scheduled job into an incident.
