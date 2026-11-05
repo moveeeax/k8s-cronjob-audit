@@ -12,7 +12,7 @@ import (
 	"github.com/moveeeax/k8s-cronjob-audit/internal/audit"
 )
 
-// version is overridden at build time with -ldflags "-X main.version=v0.1.0".
+// version is overridden at build time with -ldflags "-X main.version=v0.2.0".
 var version = "dev"
 
 func main() {
