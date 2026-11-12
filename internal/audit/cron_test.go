@@ -1,6 +1,9 @@
 package audit
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestParseScheduleGap(t *testing.T) {
 	cases := []struct {
@@ -67,5 +70,76 @@ func TestParseScheduleDayOfWeekSevenFoldsToSunday(t *testing.T) {
 	// separate firing days.
 	if _, err := ParseSchedule("0 0 * * 0,7"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseScheduleStripsTimeZonePrefix(t *testing.T) {
+	// The upstream parser accepts the prefix; the API rejects it. Parsing it
+	// here keeps bad-schedule quiet so the timezone rule owns the finding.
+	for expr, zone := range map[string]string{
+		"CRON_TZ=America/New_York 0 6 * * *": "America/New_York",
+		"TZ=Etc/UTC */5 * * * *":             "Etc/UTC",
+	} {
+		s, err := ParseSchedule(expr)
+		if err != nil {
+			t.Fatalf("ParseSchedule(%q): %v", expr, err)
+		}
+		if s.TZPrefix != zone {
+			t.Errorf("ParseSchedule(%q).TZPrefix = %q, want %q", expr, s.TZPrefix, zone)
+		}
+	}
+	if _, err := ParseSchedule("CRON_TZ=Etc/UTC"); err == nil {
+		t.Error("a prefix with no fields after it should not parse")
+	}
+	if _, err := ParseSchedule("TZ=Etc/UTC 0 25 * * *"); err == nil {
+		t.Error("the fields after the prefix should still be validated")
+	}
+}
+
+func TestScheduleFixedHours(t *testing.T) {
+	cases := map[string]bool{
+		"0 2 * * *":    true,
+		"0 */6 * * *":  true,
+		"0 9-17 * * *": true,
+		"@daily":       true,
+		"*/5 * * * *":  false,
+		"@hourly":      false,
+		"@every 6h":    false,
+	}
+	for expr, want := range cases {
+		s, err := ParseSchedule(expr)
+		if err != nil {
+			t.Fatalf("ParseSchedule(%q): %v", expr, err)
+		}
+		if got := s.FixedHours(); got != want {
+			t.Errorf("ParseSchedule(%q).FixedHours() = %v, want %v", expr, got, want)
+		}
+	}
+}
+
+func TestScheduleMatchesDayFieldsLikeCron(t *testing.T) {
+	// 2026-03-08 is a Sunday, the 8th.
+	sunday8 := time.Date(2026, 3, 8, 2, 0, 0, 0, time.UTC)
+	cases := map[string]bool{
+		"0 2 * * *":   true,
+		"0 2 8 * *":   true,
+		"0 2 * * 0":   true,
+		"0 2 * * 1":   false,
+		"0 2 1 * *":   false,
+		"0 2 1 * 0":   true, // both day fields restricted: either one matches
+		"0 2 1 * 1":   false,
+		"0 2 * 4 *":   false,
+		"1 2 * * *":   false,
+		"@every 1m":   false,
+		"0 2 8 MAR *": true,
+	}
+	for expr, want := range cases {
+		s, err := ParseSchedule(expr)
+		if err != nil {
+			t.Fatalf("ParseSchedule(%q): %v", expr, err)
+		}
+		if got := s.Matches(sunday8); got != want {
+			t.Errorf("ParseSchedule(%q).Matches(%s) = %v, want %v", expr, sunday8, got, want)
+		}
 	}
 }

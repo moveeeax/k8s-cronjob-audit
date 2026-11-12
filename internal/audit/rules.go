@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // historyLimitCeiling is where "keep some history" turns into "keep every Job
@@ -14,6 +15,10 @@ const historyLimitCeiling = 50
 // tightScheduleMinutes is the overlap danger zone: a job that fires this often
 // has to finish in under that gap, every time, or Allow concurrency stacks runs.
 const tightScheduleMinutes = 5
+
+// now is the start of the year the timezone rule scans for clock changes.
+// Tests pin it so a fixture's findings do not depend on the date.
+var now = time.Now
 
 // Rule is one check. It gets a decoded CronJob and returns a message, or the
 // empty string when the CronJob is fine. Returning a severity lets a rule
@@ -140,6 +145,66 @@ var Rules = []Rule{
 			return "", ""
 		},
 	},
+	{
+		Name:     "timezone",
+		Severity: SeverityHigh,
+		Summary:  "timeZone is invalid or CRON_TZ is in the schedule, timeZone is unset, or a DST change skips or repeats a run",
+		check:    checkTimeZone,
+	},
+}
+
+func checkTimeZone(cj CronJob) (string, Severity) {
+	schedule := cj.Spec.Schedule
+	tz := cj.Spec.TimeZone
+
+	// Both of these make the API refuse the manifest, so they come first and
+	// nothing softer is reported alongside them.
+	var rejected []string
+	if strings.Contains(schedule, "TZ") {
+		note := fmt.Sprintf("schedule %q embeds a time zone; the API rejects TZ and CRON_TZ in schedule (\"use timeZone field instead\")", schedule)
+		if sched, err := ParseSchedule(schedule); err == nil && sched.TZPrefix != "" && tz == nil {
+			note += fmt.Sprintf(", so move it to timeZone: %q", sched.TZPrefix)
+		}
+		rejected = append(rejected, note)
+	}
+	var loc *time.Location
+	if tz != nil {
+		var err error
+		if loc, err = ValidateTimeZone(*tz); err != nil {
+			rejected = append(rejected, fmt.Sprintf("timeZone %q is invalid (%v); the API rejects the manifest", *tz, err))
+		}
+	}
+	if len(rejected) > 0 {
+		return strings.Join(rejected, "; "), SeverityHigh
+	}
+
+	sched, err := ParseSchedule(schedule)
+	if err != nil || !sched.FixedHours() {
+		return "", ""
+	}
+	if tz == nil {
+		return fmt.Sprintf(
+			"timeZone is unset, so schedule %q runs in kube-controller-manager's local zone (usually UTC) and shifts with it; set timeZone (Kubernetes 1.27+), e.g. \"Etc/UTC\"",
+			schedule), SeverityLow
+	}
+
+	hits := dstHits(sched, loc, now())
+	if len(hits) == 0 {
+		return "", ""
+	}
+	var notes []string
+	for _, hit := range hits {
+		if hit.skipped {
+			notes = append(notes, fmt.Sprintf("the clock change on %s skips %s, so that day's run never happens",
+				hit.at.Format("2006-01-02"), hit.at.Format("15:04")))
+		} else {
+			notes = append(notes, fmt.Sprintf("%s happens twice on %s, so that run fires twice",
+				hit.at.Format("15:04"), hit.at.Format("2006-01-02")))
+		}
+	}
+	return fmt.Sprintf(
+		"schedule %q in %s hits a DST change: %s; move it outside the clock-change hours or use a zone without DST such as \"Etc/UTC\"",
+		schedule, *tz, strings.Join(notes, ", and ")), SeverityMedium
 }
 
 func policyLabel(policy string) string {

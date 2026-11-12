@@ -1,0 +1,87 @@
+# Every CronJob here is hardened except for its time zone handling, so the
+# timezone rule is the only one that fires.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tz-invalid
+  namespace: ops
+spec:
+  schedule: "0 6 * * *"
+  timeZone: "Europe/Atlantis"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: job
+              image: ghcr.io/example/job:1.0.0
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tz-in-schedule
+  namespace: ops
+spec:
+  schedule: "CRON_TZ=America/New_York 0 6 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: job
+              image: ghcr.io/example/job:1.0.0
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tz-dst
+  namespace: ops
+spec:
+  schedule: "30 2 * * *"
+  timeZone: "Europe/Berlin"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: job
+              image: ghcr.io/example/job:1.0.0
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tz-unset
+  namespace: ops
+spec:
+  schedule: "0 6 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: job
+              image: ghcr.io/example/job:1.0.0
