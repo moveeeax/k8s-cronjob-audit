@@ -24,6 +24,7 @@ metadata:
   namespace: billing
 spec:
   schedule: "0 4 * * 1-5"
+  timeZone: "Europe/Berlin"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 900
   successfulJobsHistoryLimit: 5

@@ -20,6 +20,7 @@ This is the thing to look with: a single static binary that reads manifests (fil
 | `no-starting-deadline` | medium | `startingDeadlineSeconds` is unset, so a missed schedule is a silent skip |
 | `no-active-deadline` | medium | neither `activeDeadlineSeconds` nor `ttlSecondsAfterFinished` is set, so a hung run is never reaped |
 | `no-restart-policy-never` | medium / low | the job template `restartPolicy` is unset (the Job API rejects that) or `OnFailure`, which hides retries from `backoffLimit` |
+| `timezone` | high / medium / low | high: `timeZone` is not a zone the API accepts, or `CRON_TZ=`/`TZ=` is in `schedule` (the API rejects both); medium: in the `timeZone` given, a DST change in the next year skips a run or fires it twice; low: the schedule fires at fixed hours and `timeZone` is unset, so it runs in kube-controller-manager's zone |
 | `unbounded-history` | low | history limits unset or absurdly high; the default keeps 3 successes and **1** failure, so the runs worth debugging are evicted first |
 
 `k8s-cronjob-audit --list-rules` prints the rule set straight from the binary, so the help never drifts from the code.
@@ -79,6 +80,8 @@ The stream is split on top-level `---` lines first, then each document is decode
 Every field that has a meaningful Kubernetes default is a pointer on the decoded struct. That is the whole trick — `startingDeadlineSeconds: 0` and a missing `startingDeadlineSeconds` are different statements, and only one of them is a finding.
 
 The cron expression is validated by a hand-written parser rather than a scheduler library, which also gives the one number the overlap rule needs: the smallest gap between two consecutive firings in a day, wraparound included. `*/5 * * * *` is 5 minutes, `0,30 * * * *` is 30, `@daily` is 1440. The five standard fields, ranges, steps, lists, month and day names, the `@`-descriptors and `@every <duration>` all parse; an hour field of `25` does not.
+
+`timeZone` is checked the way the API server checks it (`pkg/apis/batch/validation`): non-empty, not `Local`, each path component within the IANA naming rules, and loadable by `time.LoadLocation`. The binary embeds Go's zone database, as kube-controller-manager does, so the answer does not depend on the machine's `/usr/share/zoneinfo`. For the DST check the tool walks the next 12 months of offset changes in that zone and asks whether the schedule fires inside a skipped or repeated stretch of wall-clock time; the upstream scheduler skips a time that does not exist and fires twice on one that occurs twice. Day-of-month, month and weekday fields are honored, so `0 2 1 * *` in `America/New_York` is not flagged. Schedules without a fixed hour (`*/10 * * * *`, `@hourly`, `@every`) do not get the unset-`timeZone` finding.
 
 Each rule is a function from a decoded CronJob to a message, so the test suite is fixtures in `internal/audit/testdata` and no cluster anywhere.
 

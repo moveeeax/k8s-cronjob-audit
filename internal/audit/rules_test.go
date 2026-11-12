@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 func load(t *testing.T, name string) []Document {
@@ -42,6 +43,7 @@ func TestDefaultsFireEveryDefaultRule(t *testing.T) {
 		"allow-concurrency",
 		"no-active-deadline",
 		"no-starting-deadline",
+		"timezone",
 		"unbounded-history",
 	}
 	if got := rulesFired(findings, "report-nightly"); !equal(got, want) {
@@ -60,7 +62,7 @@ func TestDefaultsFireEveryDefaultRule(t *testing.T) {
 }
 
 func TestAllowConcurrencyNamesScheduleAndDisappearsWithForbid(t *testing.T) {
-	findings := Analyze(load(t, "defaults.yaml"), Options{IgnoreRules: skip("no-active-deadline", "no-starting-deadline", "unbounded-history")})
+	findings := Analyze(load(t, "defaults.yaml"), Options{IgnoreRules: skip("no-active-deadline", "no-starting-deadline", "timezone", "unbounded-history")})
 	if len(findings) != 1 {
 		t.Fatalf("expected exactly the concurrency finding, got %v", rulesFired(findings, ""))
 	}
@@ -158,6 +160,80 @@ func TestRestartPolicyRules(t *testing.T) {
 	}
 }
 
+func TestTimeZoneRule(t *testing.T) {
+	defer func(orig func() time.Time) { now = orig }(now)
+	now = func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }
+
+	findings := Analyze(load(t, "timezone.yaml"), Options{})
+	byName := map[string]Finding{}
+	for _, f := range findings {
+		if f.Rule != "timezone" {
+			t.Fatalf("only timezone should fire on this fixture, got %+v", f)
+		}
+		byName[f.Name] = f
+	}
+	cases := []struct {
+		name     string
+		severity Severity
+		phrases  []string
+	}{
+		{"tz-invalid", SeverityHigh, []string{`"Europe/Atlantis"`, "API rejects"}},
+		{"tz-in-schedule", SeverityHigh, []string{"rejects TZ and CRON_TZ", `timeZone: "America/New_York"`}},
+		{"tz-dst", SeverityMedium, []string{`"30 2 * * *" in Europe/Berlin`, "2026-03-29 skips 02:30", "02:30 happens twice on 2026-10-25"}},
+		{"tz-unset", SeverityLow, []string{"timeZone is unset", `"0 6 * * *"`}},
+	}
+	for _, tc := range cases {
+		f, ok := byName[tc.name]
+		if !ok {
+			t.Errorf("%s: no timezone finding", tc.name)
+			continue
+		}
+		if f.Severity != tc.severity {
+			t.Errorf("%s: severity = %s, want %s", tc.name, f.Severity, tc.severity)
+		}
+		for _, p := range tc.phrases {
+			if !strings.Contains(f.Message, p) {
+				t.Errorf("%s: message missing %q: %s", tc.name, p, f.Message)
+			}
+		}
+	}
+	if len(findings) != len(cases) {
+		t.Errorf("got %d findings, want %d", len(findings), len(cases))
+	}
+}
+
+func TestTimeZoneRuleQuietCases(t *testing.T) {
+	docs := load(t, "clean.yaml")
+	for _, sched := range []string{"*/10 * * * *", "@hourly", "@every 2h"} {
+		docs[0].CronJob.Spec.Schedule = sched
+		docs[0].CronJob.Spec.TimeZone = nil
+		if got := rulesFired(Analyze(docs, Options{}), ""); len(got) != 0 {
+			t.Errorf("%q has no fixed hour, timeZone does not matter; got %v", sched, got)
+		}
+	}
+
+	// The CRON_TZ prefix is the timezone rule's finding, not bad-schedule's.
+	docs[0].CronJob.Spec.Schedule = "TZ=Etc/UTC 0 2 * * *"
+	if got := rulesFired(Analyze(docs, Options{}), ""); !equal(got, []string{"timezone"}) {
+		t.Errorf("rules = %v, want only timezone for an embedded TZ", got)
+	}
+
+	// With timeZone set too there is nothing to move, so no suggestion.
+	utc := "Etc/UTC"
+	docs[0].CronJob.Spec.TimeZone = &utc
+	f := Analyze(docs, Options{})
+	if len(f) != 1 || f[0].Severity != SeverityHigh || strings.Contains(f[0].Message, "move it to") {
+		t.Errorf("want one high finding without a move suggestion, got %+v", f)
+	}
+
+	empty := ""
+	docs[0].CronJob.Spec.Schedule = "0 2 * * *"
+	docs[0].CronJob.Spec.TimeZone = &empty
+	if f := Analyze(docs, Options{}); len(f) != 1 || f[0].Severity != SeverityHigh {
+		t.Errorf("an empty timeZone is rejected by the API, got %+v", f)
+	}
+}
+
 func TestIgnoreNameSuppressesOnlyItsTarget(t *testing.T) {
 	docs := load(t, "helm-rendered.yaml")
 	all := Analyze(docs, Options{})
@@ -181,8 +257,8 @@ func TestIgnoreRuleSuppressesOnlyItsTarget(t *testing.T) {
 	if contains(rulesFired(filtered, ""), "allow-concurrency") {
 		t.Fatal("ignored rule still reported")
 	}
-	if len(filtered) != 3 {
-		t.Fatalf("expected the remaining three findings, got %v", rulesFired(filtered, ""))
+	if len(filtered) != 4 {
+		t.Fatalf("expected the remaining four findings, got %v", rulesFired(filtered, ""))
 	}
 }
 

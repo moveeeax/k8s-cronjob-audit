@@ -155,7 +155,7 @@ func TestListRulesAndVersion(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "allow-concurrency") {
 		t.Fatalf("--list-rules: exit=%d out=%q", code, out)
 	}
-	if lines := strings.Count(strings.TrimSpace(out), "\n") + 1; lines != 7 {
+	if lines := strings.Count(strings.TrimSpace(out), "\n") + 1; lines != 8 {
 		t.Errorf("--list-rules printed %d lines, want one per rule", lines)
 	}
 	if code, out, _ := exec(t, "", "--version"); code != 0 || strings.TrimSpace(out) == "" {

@@ -8,13 +8,55 @@ import (
 	"time"
 )
 
-// Schedule is a validated cron expression, reduced to the only two things the
-// rules need: does it parse, and how close together can two runs be.
+// Schedule is a validated cron expression, reduced to what the rules need:
+// does it parse, how close together can two runs be, and which wall-clock
+// minutes it fires on.
 type Schedule struct {
 	Expr string
 	// MinGapMinutes is the smallest interval between two consecutive firings
 	// within a day, wraparound included. A daily schedule is 1440.
 	MinGapMinutes int
+	// TZPrefix is the zone name from a leading CRON_TZ= or TZ=, which the
+	// upstream parser understands and the API rejects. Empty when absent.
+	TZPrefix string
+
+	// The expanded field sets. All nil for @every, which has no wall clock.
+	minutes, hours, doms, months, dows []int
+	// domStar and dowStar record a literal * or ? in the day fields: with
+	// either one set the day fields are ANDed, otherwise ORed, as in cron.
+	domStar, dowStar bool
+}
+
+// FixedHours reports whether the schedule fires on some hours of the day but
+// not all of them, which is when the time zone decides when it runs.
+func (s *Schedule) FixedHours() bool {
+	return s.hours != nil && len(s.hours) < 24
+}
+
+// Matches reports whether the schedule fires at the wall-clock minute t, read
+// from t's own fields. @every never matches: it is not tied to the clock.
+func (s *Schedule) Matches(t time.Time) bool {
+	if s.hours == nil {
+		return false
+	}
+	if !has(s.minutes, t.Minute()) || !has(s.hours, t.Hour()) || !has(s.months, int(t.Month())) {
+		return false
+	}
+	dom := has(s.doms, t.Day())
+	dow := has(s.dows, int(t.Weekday()))
+	if s.domStar || s.dowStar {
+		return dom && dow
+	}
+	return dom || dow
+}
+
+func has(set []int, v int) bool {
+	for _, x := range set {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 var macros = map[string]string{
@@ -61,6 +103,19 @@ func ParseSchedule(expr string) (*Schedule, error) {
 		return nil, fmt.Errorf("schedule is empty")
 	}
 
+	// The upstream parser strips a leading CRON_TZ=<zone> or TZ=<zone> before
+	// reading the fields. Strip it the same way so the rest is still validated;
+	// the timezone rule reports the prefix itself.
+	var tzPrefix string
+	if strings.HasPrefix(raw, "CRON_TZ=") || strings.HasPrefix(raw, "TZ=") {
+		sp := strings.Index(raw, " ")
+		if sp < 0 {
+			return nil, fmt.Errorf("time zone prefix %q is not followed by a schedule", raw)
+		}
+		tzPrefix = raw[strings.Index(raw, "=")+1 : sp]
+		raw = strings.TrimSpace(raw[sp:])
+	}
+
 	if strings.HasPrefix(raw, "@every ") {
 		d, err := time.ParseDuration(strings.TrimSpace(strings.TrimPrefix(raw, "@every ")))
 		if err != nil {
@@ -73,7 +128,7 @@ func ParseSchedule(expr string) (*Schedule, error) {
 		if gap < 1 {
 			gap = 1
 		}
-		return &Schedule{Expr: raw, MinGapMinutes: gap}, nil
+		return &Schedule{Expr: expr, MinGapMinutes: gap, TZPrefix: tzPrefix}, nil
 	}
 
 	if strings.HasPrefix(raw, "@") {
@@ -98,7 +153,18 @@ func ParseSchedule(expr string) (*Schedule, error) {
 		sets[i] = values
 	}
 
-	return &Schedule{Expr: expr, MinGapMinutes: minGap(sets[1], sets[0])}, nil
+	return &Schedule{
+		Expr:          expr,
+		MinGapMinutes: minGap(sets[1], sets[0]),
+		TZPrefix:      tzPrefix,
+		minutes:       sets[0],
+		hours:         sets[1],
+		doms:          sets[2],
+		months:        sets[3],
+		dows:          sets[4],
+		domStar:       parts[2] == "*" || parts[2] == "?",
+		dowStar:       parts[4] == "*" || parts[4] == "?",
+	}, nil
 }
 
 // minGap walks every firing time in a single day and returns the smallest

@@ -5,6 +5,7 @@ metadata:
   namespace: kube-system
 spec:
   schedule: "0 */6 * * *"
+  timeZone: "Etc/UTC"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 120
   successfulJobsHistoryLimit: 10

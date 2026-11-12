@@ -21,6 +21,7 @@ type Metadata struct {
 
 type CronJobSpec struct {
 	Schedule                   string      `json:"schedule"`
+	TimeZone                   *string     `json:"timeZone"`
 	ConcurrencyPolicy          string      `json:"concurrencyPolicy"`
 	StartingDeadlineSeconds    *int64      `json:"startingDeadlineSeconds"`
 	SuccessfulJobsHistoryLimit *int32      `json:"successfulJobsHistoryLimit"`
